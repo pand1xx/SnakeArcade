@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SNAKE ARCADE PRO</title>
+    <style>
+        :root {
+            --neon-green: #39ff14;
+            --neon-red: #ff3131;
+            --neon-blue: #00d2ff;
+            --dark-bg: #0d0d0d;
+        }
+
+        body {
+            background: var(--dark-bg);
+            color: white;
+            font-family: 'Segoe UI', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        #game-container {
+            position: relative;
+            background: #1a1a1a;
+            padding: 20px;
+            border-radius: 20px;
+            box-shadow: 0 0 50px rgba(0,0,0,0.8);
+        }
+
+        canvas {
+            display: block;
+            background: #000;
+            border-radius: 10px;
+            border: 3px solid #333;
+        }
+
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.92);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+            border-radius: 20px;
+        }
+
+        h1 { font-size: 48px; color: var(--neon-green); text-shadow: 0 0 15px var(--neon-green); margin-bottom: 20px; }
+        
+        .menu-buttons { display: flex; flex-direction: column; gap: 12px; min-width: 220px; }
+
+        button {
+            background: transparent;
+            border: 2px solid var(--neon-green);
+            color: var(--neon-green);
+            padding: 12px 25px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: 0.2s;
+            text-transform: uppercase;
+        }
+
+        button:hover { 
+            background: var(--neon-green); 
+            color: black; 
+            box-shadow: 0 0 20px var(--neon-green); 
+        }
+
+        .discord-btn {
+            border-color: var(--neon-blue);
+            color: var(--neon-blue);
+            margin-top: 10px;
+        }
+
+        .discord-btn:hover {
+            background: var(--neon-blue);
+            color: white;
+            box-shadow: 0 0 20px var(--neon-blue);
+        }
+
+        .hidden { display: none !important; }
+
+        #hud {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 15px;
+            font-weight: bold;
+            color: #888;
+            font-size: 14px;
+        }
+
+        #hud span { color: var(--neon-green); }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div id="hud">
+            <div>SCORE: <span id="scoreDisplay">0</span></div>
+            <div>BEST: <span id="highScoreDisplay">0</span></div>
+        </div>
+
+        <canvas id="gameCanvas" width="400" height="400"></canvas>
+
+        <div id="mainMenu" class="overlay">
+            <h1>SNAKE</h1>
+            <div class="menu-buttons">
+                <button onclick="handleButtonClick(startGame)">START GAME</button>
+                <button onclick="handleButtonClick(toggleSettings)">SETTINGS</button>
+                <button class="discord-btn" onclick="handleButtonClick(openDiscord)">JOIN MY DISCORD</button>
+            </div>
+        </div>
+
+        <div id="settingsMenu" class="overlay hidden">
+            <h1>SETTINGS</h1>
+            <div class="menu-buttons">
+                <button id="soundBtn" onclick="handleButtonClick(toggleSound)">SOUND: ON</button>
+                <button onclick="handleButtonClick(toggleSettings)">BACK</button>
+            </div>
+        </div>
+
+        <div id="pauseMenu" class="overlay hidden">
+            <h1>PAUSED</h1>
+            <button onclick="handleButtonClick(unpause)">RESUME</button>
+        </div>
+
+        <div id="gameOverMenu" class="overlay hidden">
+            <h1 style="color: var(--neon-red); text-shadow: 0 0 10px var(--neon-red);">YOU DIED</h1>
+            <p style="font-size: 20px;">Score: <span id="finalScore" style="color:white">0</span></p>
+            <button onclick="handleButtonClick(backToMenu)">MAIN MENU</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const box = 20;
+
+        let snake, food, direction, nextDirection, score, gameLoop;
+        let isPaused = false;
+        let soundEnabled = true;
+        let highScore = localStorage.getItem("snakeHighScore") || 0;
+
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        function playSound(freq, type, duration, vol = 0.1) {
+            if (!soundEnabled) return;
+            try {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + duration);
+            } catch(e) { console.log("Audio not allowed yet"); }
+        }
+
+        // Funcție specială pentru butoane
+        function handleButtonClick(callback) {
+            playSound(1200, "sine", 0.1, 0.05); // Sunet click buton
+            callback();
+        }
+
+        function openDiscord() {
+            window.open("https://discord.gg/Zs9zPxzu", "_blank");
+        }
+
+        document.getElementById("highScoreDisplay").innerText = highScore;
+
+        window.addEventListener("keydown", e => {
+            const key = e.keyCode;
+            if (key == 80) handleButtonClick(togglePause);
+            if (key == 37 || key == 65) if(direction != "RIGHT") nextDirection = "LEFT";
+            if (key == 38 || key == 87) if(direction != "DOWN") nextDirection = "UP";
+            if (key == 39 || key == 68) if(direction != "LEFT") nextDirection = "RIGHT";
+            if (key == 40 || key == 83) if(direction != "UP") nextDirection = "DOWN";
+        });
+
+        function toggleSettings() {
+            document.getElementById("mainMenu").classList.toggle("hidden");
+            document.getElementById("settingsMenu").classList.toggle("hidden");
+        }
+
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+            document.getElementById("soundBtn").innerText = "SOUND: " + (soundEnabled ? "ON" : "OFF");
+        }
+
+        function togglePause() {
+            if(document.getElementById("mainMenu").classList.contains("hidden") && 
+               document.getElementById("gameOverMenu").classList.contains("hidden")) {
+                isPaused = !isPaused;
+                document.getElementById("pauseMenu").classList.toggle("hidden", !isPaused);
+            }
+        }
+
+        function unpause() { isPaused = false; document.getElementById("pauseMenu").classList.add("hidden"); }
+
+        function startGame() {
+            snake = [{x: 10 * box, y: 10 * box}, {x: 9 * box, y: 10 * box}];
+            direction = "RIGHT";
+            nextDirection = "RIGHT";
+            score = 0;
+            isPaused = false;
+            generateFood();
+            document.querySelectorAll('.overlay').forEach(el => el.classList.add('hidden'));
+            document.getElementById("scoreDisplay").innerText = "0";
+            
+            if(gameLoop) clearInterval(gameLoop);
+            gameLoop = setInterval(update, 130);
+            playSound(600, "square", 0.15); // Sunet start
+        }
+
+        function generateFood() {
+            food = {
+                x: Math.floor(Math.random() * (canvas.width/box)) * box,
+                y: Math.floor(Math.random() * (canvas.height/box)) * box
+            };
+            // Evită spawn pe șarpe
+            if(snake.some(p => p.x === food.x && p.y === food.y)) generateFood();
+        }
+
+        function backToMenu() {
+            document.getElementById("gameOverMenu").classList.add("hidden");
+            document.getElementById("mainMenu").classList.remove("hidden");
+        }
+
+        function update() {
+            if (isPaused) return;
+
+            direction = nextDirection;
+            let headX = snake[0].x;
+            let headY = snake[0].y;
+
+            if (direction == "LEFT") headX -= box;
+            if (direction == "UP") headY -= box;
+            if (direction == "RIGHT") headX += box;
+            if (direction == "DOWN") headY += box;
+
+            if (headX < 0 || headX >= canvas.width || headY < 0 || headY >= canvas.height || 
+                snake.some(part => part.x === headX && part.y === headY)) {
+                return endGame();
+            }
+
+            if (headX === food.x && headY === food.y) {
+                score++;
+                document.getElementById("scoreDisplay").innerText = score;
+                playSound(880, "sine", 0.1, 0.1);
+                if(score > highScore) {
+                    highScore = score;
+                    localStorage.setItem("snakeHighScore", highScore);
+                    document.getElementById("highScoreDisplay").innerText = highScore;
+                }
+                generateFood();
+            } else {
+                snake.pop();
+            }
+
+            snake.unshift({x: headX, y: headY});
+            draw();
+        }
+
+        function draw() {
+            ctx.fillStyle = "black";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Food
+            ctx.fillStyle = "#ff3131";
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = "red";
+            ctx.beginPath();
+            ctx.arc(food.x + box/2, food.y + box/2, 7, 0, Math.PI*2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            // Snake
+            snake.forEach((part, i) => {
+                ctx.fillStyle = i === 0 ? "#39ff14" : "#1a7a0a";
+                ctx.fillRect(part.x + 1, part.y + 1, box - 2, box - 2);
+            });
+        }
+
+        function endGame() {
+            playSound(150, "sawtooth", 0.5, 0.2); // Sunet moarte
+            clearInterval(gameLoop);
+            document.getElementById("finalScore").innerText = score;
+            document.getElementById("gameOverMenu").classList.remove("hidden");
+        }
+    </script>
+</body>
+</html>
